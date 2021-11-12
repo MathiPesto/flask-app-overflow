@@ -1,8 +1,9 @@
 from flask import Flask,render_template,url_for,request
+import pandas as pd
 import re
 import string
 import unicodedata
-import contractions
+import requests
 import nltk
 from nltk.corpus import stopwords
 from nltk.stem.wordnet import WordNetLemmatizer
@@ -24,49 +25,92 @@ def home():
 
 @app.route('/predict',methods=['POST'])
 def predict():
-	input = input
-	df= pd.read_csv("Questions_cleaned.csv")
+	input = str(request.form.get('input'))
+	questions= pd.read_csv("question_import.csv")
 	
 	##Traitement de l'input pour qu'il soit
+
+	## Traitement des tags
+
+	questions["Tags"] = questions.Tags.apply(lambda x: x.replace(" '","").replace("'", "").strip())
+	questions["Tags"] = questions.Tags.apply(lambda x: x[1:-1].split(","))
+	
+	special_chars = {}
+	for i, _tags in enumerate(questions['Tags']):
+		for _i, _tag in enumerate(_tags):
+			if '+' in _tag:
+				_tags[_i] = re.sub(r'\+', '_plus', _tag)
+			elif '#' in _tag: 
+				_tags[_i] = re.sub(r'#', '_sharp', _tag)
+	
+	for i , _tags in enumerate(questions['Tags']):
+  
+		for _i, _tag in enumerate(_tags):
+			if _tag == "c#":
+				_tags[_i] = "c_sharp"
+			elif _tag == ".net" :
+				_tags[_i] = 'dot_net'
+	
+	tags = questions['Tags'].apply(lambda x: " ".join(x) )
+
+	cv = CountVectorizer(ngram_range=(1,1),analyzer='word', lowercase=False,min_df=1) 
+
+
+	Tags_train = cv.fit_transform(tags)
+	Tags_train=pd.DataFrame(Tags_train.toarray(), columns=cv.get_feature_names())
+
+	Tags_train = Tags_train.sum()
+	Tags_train = Tags_train.sort_values(ascending = False)
+
+	tags_list = Tags_train[Tags_train>20].index.to_list()
+
+	tag_list_new = []
+	for tag in tags_list:
+		tag = tag.replace(" ","")
+		tag_list_new.append(tag)
+
+	for i , _tags in enumerate(questions['Tags']):
+		to_drop = []
+		for _i, _tag in enumerate(_tags):
+			
+			if _tag not in tag_list_new:
+				to_drop.append(_i)
+		to_drop.sort(reverse=True)
+		for idx in to_drop :
+			_tags.pop(idx) 
+
 	## au bon format
 	## Fonctions
-	def remove_punctuations(text):
-		for punctuation in string.punctuation:
-			text = text.replace(punctuation, '')
-		return text
+	input = input.lower()
+	for punctuation in string.punctuation:
+		input = input.replace(punctuation, '')
+	
 
 
-	def remove_accented_chars(text):
-		new_text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8', 'ignore')
-		return new_text
+	input = unicodedata.normalize('NFKD', input).encode('ascii', 'ignore').decode('utf-8', 'ignore')
+	
 
-	def remove_numbers(text):
-		# define the pattern to keep
-		pattern = r'[^a-zA-z.,!?/:;\"\'\s# +]' 
-		return re.sub(pattern, '', text)
+	pattern = r'[^a-zA-z.,!?/:;\"\'\s# +]' 
+	input = re.sub(pattern, '', input)
 
 
-	def remove_extra_whitespace_tabs(text):
-		#pattern = r'^\s+$|\s+$'
-		pattern = r'^\s*|\s\s*'
-		return re.sub(pattern, ' ', text).strip()
+	pattern = r'^\s*|\s\s*'
+	input = re.sub(pattern, ' ', input).strip()
 
 	nltk.download('wordnet')
 
 	w_tokenizer = nltk.tokenize.WhitespaceTokenizer()
 	lemmatizer = nltk.stem.WordNetLemmatizer()
 
-	def lemmatize_text(text):
-		return [lemmatizer.lemmatize(w) for w in w_tokenizer.tokenize(text)]
+	input = [lemmatizer.lemmatize(w) for w in w_tokenizer.tokenize(input)]
 	
 	## Application fonctions
-	input = remove_punctuations(input)
-	input = remove_accented_chars(input)
-	input = remove_numbers(input)
-	input = remove_extra_whitespace_tabs(input)
-	input = contractions.fix(input)
-	input = input.lower()
-	input = lemmatize_text(input)
+	
+	nltk.download('stopwords')
+	## Faire un commentaire sur le no que j'ai décidé de garder dans le rapport écrit parce qu'il ne s'agit pas de sentiment 
+	## analysis
+	all_stopwords = stopwords.words('english')
+	
 	for elt_ in input:
 		if elt_ in all_stopwords:
 			input.remove(elt_)
@@ -91,13 +135,10 @@ def predict():
 
 	## Jeu d'
 
-	nltk.download('stopwords')
-	## Faire un commentaire sur le no que j'ai décidé de garder dans le rapport écrit parce qu'il ne s'agit pas de sentiment 
-	## analysis
-	all_stopwords = stopwords.words('english')
+
 
 	## Importation du modèle
-	rfc_model = pickle.load(open("/content/drive/MyDrive/P05_pestourie_mathilde/deploiement_rfc_final.pkl", 'rb'))
+	rfc_model = pickle.load(open("deploiement_rfc_final.pkl", 'rb'))
 
 
 	##prédictions
@@ -109,12 +150,7 @@ def predict():
 		return tuples
 	result = Remove(y_pred_inversed)
 	
-	if request.method == 'POST':
-		message = request.form['message']
-		data = [message]
-		vect = cv.transform(data).toarray()
-		my_prediction = clf.predict(vect)
-	return render_template('result.html',prediction = my_prediction)
+	return render_template('result.html',prediction = result)
 
 if __name__ == '__main__':
 	app.run(debug=True)
