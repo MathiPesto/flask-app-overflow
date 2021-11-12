@@ -25,7 +25,11 @@ def home():
 
 @app.route('/predict',methods=['POST'])
 def predict():
-	input = str(request.form.get('input'))
+	input = str(request.form.get('question'))
+	print("Request is", request.form)
+	
+	print("Input is:", input)
+	
 	questions= pd.read_csv("question_import.csv")
 	
 	##Traitement de l'input pour qu'il soit
@@ -145,12 +149,12 @@ def predict():
 	y_pred = rfc_model.predict(tf_input)
 	y_pred_inversed = multilabel_binarizer\
     .inverse_transform(y_pred)
-	def Remove(tuples):
-		tuples = [t for t in tuples if t]
-		return tuples
-	result = Remove(y_pred_inversed)
 	
-	return render_template('result.html',prediction = result)
+	y_pred_inversed = [t for t in y_pred_inversed if t]
+	
+	print("The result is :", y_pred_inversed)
+	
+	return render_template('result.html',prediction = y_pred_inversed)
 
 if __name__ == '__main__':
 	app.run(debug=True)
